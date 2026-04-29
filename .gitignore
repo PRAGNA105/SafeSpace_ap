@@ -27,8 +27,10 @@ dist-ssr
 .env
 .env.local
 .env.production
+backend/.env
 backend-node/.env
 
 .vercel
 .pnpm-store/
 backend-hostinger-upload.zip
+backend-hostinger-upload/
