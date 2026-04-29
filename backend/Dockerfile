@@ -1,14 +1,10 @@
-FROM php:8.2-apache
+FROM php:8.2-cli
 
-RUN docker-php-ext-install mysqli pdo pdo_mysql \
-    && a2dismod mpm_event mpm_worker \
-    && a2enmod mpm_prefork rewrite headers
+RUN docker-php-ext-install mysqli pdo pdo_mysql
 
-COPY docker/apache-vhost.conf /etc/apache2/sites-available/000-default.conf
+WORKDIR /app
+COPY . /app
 
-WORKDIR /var/www/html
-COPY . /var/www/html
+EXPOSE 8080
 
-RUN chown -R www-data:www-data /var/www/html
-
-EXPOSE 80
+CMD ["sh", "-c", "php -S 0.0.0.0:${PORT:-8080} -t /app"]
