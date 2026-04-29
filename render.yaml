@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: safespace-chatbot
+    runtime: node
+    rootDir: backend-node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: FRONTEND_ORIGINS
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      - key: ADMIN_SUPPORT_PHONE
+        sync: false
+      - key: SARVAM_API_KEY
+        sync: false
+      - key: SARVAM_API_SUBSCRIPTION_KEY
+        sync: false
+      - key: SARVAM_BASE_URL
+        value: https://api.sarvam.ai
+      - key: SARVAM_CHAT_MODEL
+        value: sarvam-30b
+      - key: SARVAM_TTS_SPEAKER
+        value: priya

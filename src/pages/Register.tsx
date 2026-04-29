@@ -63,6 +63,7 @@ export default function Register() {
       if (response.success) {
         localStorage.setItem('authToken', response.token);
         localStorage.setItem('user', JSON.stringify(response.user));
+        window.dispatchEvent(new Event('auth-updated'));
         
         toast({
           title: "✅ Account Created!",
@@ -84,8 +85,8 @@ export default function Register() {
     }
   };
 
-  const handleGoogleSuccess = (token: string, user: any) => {
-    navigate('/');
+  const handleGoogleSuccess = (_token: string, _user: unknown) => {
+    navigate('/', { replace: true });
   };
 
   return (

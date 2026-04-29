@@ -78,125 +78,301 @@ export const userService = {
   },
 };
 
-// Mood Service
-export const moodService = {
-  saveMoodLog: async (moodLevel: number, moodEmoji: string, moodLabel: string, notes?: string) => {
-    return apiCall('mood.php?action=save', {
+// Feedback Service
+export const feedbackService = {
+  submit: async (data: { type: string; title: string; description: string; is_anonymous: boolean }) => {
+    return apiCall('feedback.php?action=submit', {
       method: 'POST',
-      body: { mood_level: moodLevel, mood_emoji: moodEmoji, mood_label: moodLabel, notes },
+      body: data,
     });
   },
 
-  getMoodLogs: async (days: number = 7) => {
-    return apiCall(`mood.php?action=logs&days=${days}`, { method: 'GET' });
-  },
-
-  getMoodStats: async () => {
-    return apiCall('mood.php?action=stats', { method: 'GET' });
+  getMyReports: async () => {
+    return apiCall('feedback.php?action=my_reports', { method: 'GET' });
   },
 };
 
-// SOS Service
-export const sosService = {
-  triggerSOS: async (latitude?: number, longitude?: number) => {
-    return apiCall('sos.php?action=trigger', {
-      method: 'POST',
-      body: { latitude, longitude },
+// Announcement Service
+export const announcementService = {
+  getAll: async () => {
+    return apiCall('announcements.php', {
+      method: 'GET',
+      requiresAuth: false,
     });
-  },
-
-  resolveSOS: async (sosId: number) => {
-    return apiCall('sos.php?action=resolve', {
-      method: 'POST',
-      body: { sos_id: sosId },
-    });
-  },
-
-  getSOSHistory: async () => {
-    return apiCall('sos.php?action=history', { method: 'GET' });
   },
 };
+
 
 // Admin Service
 export const adminService = {
-  // Get authorization token for admin operations
-  setAdminToken: (token: string) => {
-    localStorage.setItem('adminToken', token);
-  },
-
-  getAdminToken: () => {
-    return localStorage.getItem('adminToken');
-  },
-
   // Get all users with their stats
   getAllUsers: async () => {
-    const token = adminService.getAdminToken();
-    if (!token) throw new Error('Admin token not set');
-
     return apiCall('admin.php?action=all-users', {
       method: 'GET',
-      customHeaders: { 'Authorization': `Bearer ${token}` },
-      requiresAuth: false,
+      requiresAuth: true,
     });
   },
 
   // Get specific user's details and all interactions
   getUserDetails: async (userId: number) => {
-    const token = adminService.getAdminToken();
-    if (!token) throw new Error('Admin token not set');
-
     return apiCall(`admin.php?action=user-details&user_id=${userId}`, {
       method: 'GET',
-      customHeaders: { 'Authorization': `Bearer ${token}` },
-      requiresAuth: false,
+      requiresAuth: true,
     });
   },
 
-  // Get user's activity timeline
+  // Dashboard activity timeline for a user
   getUserActivity: async (userId: number, limit: number = 50) => {
-    const token = adminService.getAdminToken();
-    if (!token) throw new Error('Admin token not set');
-
     return apiCall(`admin.php?action=user-activity&user_id=${userId}&limit=${limit}`, {
       method: 'GET',
-      customHeaders: { 'Authorization': `Bearer ${token}` },
-      requiresAuth: false,
-    });
-  },
-
-  // Get mood analytics (last 30 days)
-  getMoodAnalytics: async () => {
-    const token = adminService.getAdminToken();
-    if (!token) throw new Error('Admin token not set');
-
-    return apiCall('admin.php?action=mood-analytics', {
-      method: 'GET',
-      customHeaders: { 'Authorization': `Bearer ${token}` },
-      requiresAuth: false,
-    });
-  },
-
-  // Get SOS analytics
-  getSOSAnalytics: async () => {
-    const token = adminService.getAdminToken();
-    if (!token) throw new Error('Admin token not set');
-
-    return apiCall('admin.php?action=sos-analytics', {
-      method: 'GET',
-      customHeaders: { 'Authorization': `Bearer ${token}` },
-      requiresAuth: false,
+      requiresAuth: true,
     });
   },
 
   // Get dashboard summary
   getDashboardSummary: async () => {
-    const token = adminService.getAdminToken();
-    if (!token) throw new Error('Admin token not set');
-
     return apiCall('admin.php?action=dashboard-summary', {
       method: 'GET',
-      customHeaders: { 'Authorization': `Bearer ${token}` },
+      requiresAuth: true,
+    });
+  },
+};
+
+// Doctor Service
+export const doctorService = {
+  getSchedule: async () => {
+    return apiCall('doctors.php?action=get-schedule', {
+      method: 'GET',
       requiresAuth: false,
     });
+  },
+
+  getServices: async () => {
+    return apiCall('doctors.php?action=get-services', {
+      method: 'GET',
+      requiresAuth: false,
+    });
+  },
+
+  getScheduleByService: async (service: string) => {
+    return apiCall(`doctors.php?action=get-schedule-by-service&service=${encodeURIComponent(service)}`, {
+      method: 'GET',
+      requiresAuth: false,
+    });
+  },
+
+  updateStatus: async (id: number, status: 'Available' | 'Busy' | 'Offline') => {
+    return apiCall('doctors.php?action=update-status', {
+      method: 'POST',
+      body: { id, status },
+      requiresAuth: false,
+    });
+  },
+};
+
+// Waiting List Service
+export const waitingListService = {
+  join: async (doctorId: number, purposeCategory: string, purposeDetail: string, priorityLevel: number, customReason?: string) => {
+    return apiCall('waiting_list.php?action=join', {
+      method: 'POST',
+      body: { 
+        doctor_id: doctorId, 
+        purpose_category: purposeCategory, 
+        purpose_detail: purposeDetail, 
+        priority_level: priorityLevel,
+        custom_reason: customReason
+      },
+    });
+  },
+
+  getStatus: async () => {
+    return apiCall('waiting_list.php?action=status', {
+      method: 'GET',
+    });
+  },
+
+  async getAllAdmin() {
+    return apiCall('waiting_list.php?action=admin_all', {
+      method: 'GET',
+      requiresAuth: true,
+    });
+  }
+};
+
+// Appointment Service
+export const appointmentService = {
+  async create(data: any) {
+    return apiCall('appointments.php?action=create', {
+      method: 'POST',
+      body: data,
+      requiresAuth: true,
+    });
+  },
+
+  async getMyAppointments() {
+    return apiCall('appointments.php?action=my', {
+      method: 'GET',
+      requiresAuth: true,
+    });
+  },
+
+  async getAllAdmin(filter: 'all' | 'today' | 'upcoming' | 'past' = 'all') {
+    return apiCall(`appointments.php?action=admin_all&filter=${filter}`, {
+      method: 'GET',
+      requiresAuth: true,
+    });
+  },
+
+  async getTodayQueue() {
+    return apiCall('appointments.php?action=today_queue', {
+      method: 'GET',
+      requiresAuth: true,
+    });
+  },
+
+  async updateStatus(id: number, status: string) {
+    return apiCall('appointments.php?action=update_status', {
+      method: 'PUT',
+      body: { id, status },
+      requiresAuth: true,
+    });
+  }
+};
+
+export const queueService = {
+  async getStatus(doctorId?: number) {
+    const url = doctorId
+      ? `queue.php?action=status&doctor_id=${doctorId}`
+      : `queue.php?action=status`;
+    return apiCall(url, { method: 'GET' });
+  }
+};
+
+// Lab Test Service
+export const labTestService = {
+  async create(data: any) {
+    return apiCall('lab_tests.php?action=create', {
+      method: 'POST',
+      body: data,
+      requiresAuth: true,
+    });
+  },
+
+  async getMyRequests() {
+    return apiCall('lab_tests.php?action=my', {
+      method: 'GET',
+      requiresAuth: true,
+    });
+  },
+
+  async getAllAdmin(status?: string) {
+    const url = status
+      ? `lab_tests.php?action=admin_all&status=${status}`
+      : 'lab_tests.php?action=admin_all';
+    return apiCall(url, {
+      method: 'GET',
+      requiresAuth: true,
+    });
+  },
+
+  async updateStatus(id: number, data: any) {
+    return apiCall('lab_tests.php?action=update', {
+      method: 'PUT',
+      body: { id, ...data },
+      requiresAuth: true,
+    });
+  },
+};
+
+export const medicalRecordsService = {
+  getDashboard: async () => {
+    return apiCall('medical_records.php?action=dashboard', { method: 'GET', requiresAuth: true });
+  },
+
+  getProfile: async () => {
+    return apiCall('medical_records.php?action=profile', { method: 'GET', requiresAuth: true });
+  },
+
+  saveProfile: async (data: Record<string, any>) => {
+    return apiCall('medical_records.php?action=profile', {
+      method: 'POST',
+      body: data,
+      requiresAuth: true,
+    });
+  },
+
+  getMedicines: async () => {
+    return apiCall('medical_records.php?action=medicines', { method: 'GET', requiresAuth: true });
+  },
+
+  saveMedicine: async (data: Record<string, any>) => {
+    return apiCall('medical_records.php?action=medicine', {
+      method: 'POST',
+      body: data,
+      requiresAuth: true,
+    });
+  },
+
+  deleteMedicine: async (id: number) => {
+    return apiCall('medical_records.php?action=medicine-delete', {
+      method: 'POST',
+      body: { id },
+      requiresAuth: true,
+    });
+  },
+
+  getPharmacies: async () => {
+    return apiCall('medical_records.php?action=pharmacies', { method: 'GET', requiresAuth: true });
+  },
+
+  savePharmacy: async (data: Record<string, any>) => {
+    return apiCall('medical_records.php?action=pharmacy', {
+      method: 'POST',
+      body: data,
+      requiresAuth: true,
+    });
+  },
+
+  savePurchase: async (data: Record<string, any>) => {
+    return apiCall('medical_records.php?action=purchase', {
+      method: 'POST',
+      body: data,
+      requiresAuth: true,
+    });
+  },
+
+  getReminders: async () => {
+    return apiCall('medical_records.php?action=reminders', { method: 'GET', requiresAuth: true });
+  },
+
+  saveReminder: async (data: Record<string, any>) => {
+    return apiCall('medical_records.php?action=reminder', {
+      method: 'POST',
+      body: data,
+      requiresAuth: true,
+    });
+  },
+
+  deleteReminder: async (id: number) => {
+    return apiCall('medical_records.php?action=reminder-delete', {
+      method: 'POST',
+      body: { id },
+      requiresAuth: true,
+    });
+  },
+
+  getHistory: async (search = '', filter = 'all') => {
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (filter) params.set('filter', filter);
+
+    return apiCall(`medical_records.php?action=history${params.toString() ? `&${params.toString()}` : ''}`, {
+      method: 'GET',
+      requiresAuth: true,
+    });
+  },
+
+  getSummary: async () => {
+    return apiCall('medical_records.php?action=summary', { method: 'GET', requiresAuth: true });
   },
 };

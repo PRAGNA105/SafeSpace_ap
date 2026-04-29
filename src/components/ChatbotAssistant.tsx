@@ -1,17 +1,22 @@
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { MessageCircle, X, Send, Smile, Frown, Meh, Bot, User } from 'lucide-react';
+import { AlertTriangle, Bot, Loader2, MessageCircle, Mic, Send, ShieldCheck, Square, User, Volume2, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 
 interface Message {
   id: string;
   text: string;
   sender: 'user' | 'bot';
   timestamp: Date;
+  source?: 'text' | 'voice';
+  transcript?: string;
+  audioUrl?: string;
+  riskLevel?: string;
+  alertCreated?: boolean;
   suggestions?: string[];
   quickActions?: Array<{ label: string; action: string }>;
 }
@@ -19,308 +24,344 @@ interface Message {
 interface ChatbotResponse {
   success: boolean;
   reply: string;
-  intent: string;
+  transcript?: string;
+  language?: string;
+  source?: 'text' | 'voice';
+  risk?: {
+    tier: number;
+    riskLevel: string;
+    recommendedAction?: string;
+  };
+  alertCreated?: boolean;
+  audio?: {
+    audioBase64: string | null;
+    mimeType: string;
+    language: string;
+  } | null;
   mood: 'happy' | 'neutral' | 'upset' | 'frustrated' | 'confused';
   suggestions?: string[];
   quickActions?: Array<{ label: string; action: string }>;
+  sarvamConfigured?: boolean;
+  error?: string;
+}
+
+const CHATBOT_API_URL =
+  import.meta.env.VITE_CHATBOT_API_URL ||
+  (import.meta.env.DEV ? 'http://localhost:5001/api/chatbot' : '');
+
+function audioToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = String(reader.result || '');
+      resolve(result.includes(',') ? result.split(',')[1] : result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function buildAudioUrl(audio?: ChatbotResponse['audio']) {
+  if (!audio?.audioBase64) return undefined;
+  return `data:${audio.mimeType || 'audio/wav'};base64,${audio.audioBase64}`;
 }
 
 export default function ChatbotAssistant() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
-      id: '1',
-      text: 'Hello! 👋 I\'m your SafeSpace assistant. I\'m here to help you stay safe and feel supported. How can I assist you today?',
+      id: 'welcome',
+      text: 'Hi, I am Anira. I am here to help with exam pressure, stress, safety concerns, counselor booking, or health and wellness worries. You can type or speak to me, and I will reply in your language. How can I help today?',
       sender: 'bot',
       timestamp: new Date(),
-      suggestions: [
-        'Show me safety features',
-        'I need wellness support',
-        'How do I use this app?',
-        'I want to report an issue'
-      ]
-    }
+      suggestions: ['I need wellness support', 'How can I book a counselor?', 'Show safety features'],
+    },
   ]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const [currentMood, setCurrentMood] = useState<'happy' | 'neutral' | 'upset' | 'frustrated' | 'confused'>('neutral');
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  // Auto-scroll to bottom when new messages arrive
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const getMoodIcon = () => {
-    switch (currentMood) {
-      case 'happy':
-        return <Smile className="h-4 w-4 text-green-600" />;
-      case 'upset':
-      case 'frustrated':
-        return <Frown className="h-4 w-4 text-red-600" />;
-      case 'confused':
-        return <Meh className="h-4 w-4 text-yellow-600" />;
-      default:
-        return <Meh className="h-4 w-4 text-blue-600" />;
+  const submitToChatbot = async ({ text, audioBlob }: { text?: string; audioBlob?: Blob }) => {
+    if (!text?.trim() && !audioBlob) return;
+
+    if (!CHATBOT_API_URL) {
+      toast.error('Chatbot is not configured', {
+        description: 'Set VITE_CHATBOT_API_URL to your deployed chatbot service.',
+      });
+      return;
     }
-  };
 
-  const getMoodLabel = () => {
-    switch (currentMood) {
-      case 'happy':
-        return 'Positive';
-      case 'upset':
-        return 'Needs Support';
-      case 'frustrated':
-        return 'Frustrated';
-      case 'confused':
-        return 'Seeking Help';
-      default:
-        return 'Neutral';
-    }
-  };
-
-  const sendMessage = async (text?: string) => {
-    const messageText = text || inputMessage.trim();
-    if (!messageText) return;
-
-    // Add user message
     const userMessage: Message = {
-      id: Date.now().toString(),
-      text: messageText,
+      id: `${Date.now()}-user`,
+      text: text?.trim() || 'Voice message',
       sender: 'user',
-      timestamp: new Date()
+      timestamp: new Date(),
+      source: audioBlob ? 'voice' : 'text',
     };
-    setMessages(prev => [...prev, userMessage]);
+
+    setMessages((prev) => [...prev, userMessage]);
     setInputMessage('');
     setIsLoading(true);
 
     try {
-      // Call chatbot API
-      const response = await fetch('http://localhost:5001/api/chatbot', {
+      const audioBase64 = audioBlob ? await audioToBase64(audioBlob) : undefined;
+      const response = await fetch(CHATBOT_API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: messageText,
-          conversationHistory: messages.slice(-5) // Send last 5 messages for context
-        })
+          message: text?.trim(),
+          audioBase64,
+          audioMimeType: audioBlob?.type?.split(';')[0] || 'audio/webm',
+          source: audioBlob ? 'voice' : 'text',
+          studentId: localStorage.getItem('studentId') || localStorage.getItem('userId') || 'anonymous',
+          conversationHistory: messages.slice(-8).map((message) => ({
+            text: message.transcript || message.text,
+            sender: message.sender,
+          })),
+        }),
       });
 
       const data: ChatbotResponse = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to get chatbot response');
+      }
 
-      if (data.success) {
-        // Update mood
-        setCurrentMood(data.mood);
+      setCurrentMood(data.mood || 'neutral');
 
-        // Add bot response
-        const botMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          text: data.reply,
-          sender: 'bot',
-          timestamp: new Date(),
-          suggestions: data.suggestions,
-          quickActions: data.quickActions
-        };
-        setMessages(prev => [...prev, botMessage]);
-      } else {
-        throw new Error('Failed to get response');
+      if (audioBlob && data.transcript) {
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === userMessage.id
+              ? { ...message, text: data.transcript || message.text, transcript: data.transcript }
+              : message,
+          ),
+        );
+      }
+
+      const botMessage: Message = {
+        id: `${Date.now()}-bot`,
+        text: data.reply,
+        sender: 'bot',
+        timestamp: new Date(),
+        audioUrl: buildAudioUrl(data.audio),
+        riskLevel: data.risk?.riskLevel,
+        alertCreated: data.alertCreated,
+        suggestions: data.suggestions,
+        quickActions: data.quickActions,
+      };
+
+      setMessages((prev) => [...prev, botMessage]);
+
+      if (!data.sarvamConfigured) {
+        toast.warning('Sarvam key missing', {
+          description: 'Text fallback is active. Add SARVAM_API_KEY to backend-node/.env for multilingual voice and audio replies.',
+        });
+      }
+
+      if (data.alertCreated) {
+        toast.warning('Support alert created', {
+          description: 'A serious support signal was detected and logged for human follow-up.',
+        });
       }
     } catch (error) {
       console.error('Chatbot error:', error);
-      toast.error('Failed to connect', {
-        description: 'Could not reach chatbot service. Please try again.'
+      toast.error('Chatbot connection failed', {
+        description: error instanceof Error ? error.message : 'Please try again.',
       });
-
-      // Add error message
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: 'Sorry, I\'m having trouble connecting right now. Please try again in a moment.',
-        sender: 'bot',
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, errorMessage]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}-error`,
+          text: 'Sorry, I am having trouble connecting right now. Please try again in a moment.',
+          sender: 'bot',
+          timestamp: new Date(),
+        },
+      ]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleQuickAction = (action: string) => {
-    console.log('🔵 Quick Action clicked:', action);
-    
-    toast.success('Navigating...', {
-      description: `Taking you to ${action}`
-    });
-    
-    // Close chat and navigate
-    setIsOpen(false);
-    
-    // Use setTimeout to ensure state updates before navigation
-    setTimeout(() => {
-      console.log('🔵 Navigating to:', action);
-      navigate(action);
-    }, 100);
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const preferredMimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : undefined;
+      const recorder = new MediaRecorder(stream, preferredMimeType ? { mimeType: preferredMimeType } : undefined);
+      audioChunksRef.current = [];
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+
+      recorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: (recorder.mimeType || 'audio/webm').split(';')[0] });
+        stream.getTracks().forEach((track) => track.stop());
+        setIsRecording(false);
+        submitToChatbot({ audioBlob });
+      };
+
+      recorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error('Microphone error:', error);
+      toast.error('Microphone unavailable', {
+        description: 'Please allow microphone access or send a text message.',
+      });
+    }
   };
 
-  const handleSuggestionClick = (suggestion: string) => {
-    sendMessage(suggestion);
+  const stopRecording = () => {
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
   };
+
+  const handleQuickAction = (action: string) => {
+    setIsOpen(false);
+    navigate(action);
+  };
+
 
   if (!isOpen) {
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 z-50 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-full p-4 shadow-lg hover:shadow-xl transition-all hover:scale-110 group"
+        className="fixed bottom-6 right-6 z-50 rounded-full bg-teal-700 p-4 text-white shadow-lg transition-all hover:scale-105 hover:bg-teal-800"
         aria-label="Open chat assistant"
       >
-        <MessageCircle className="h-6 w-6 group-hover:animate-pulse" />
-        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center animate-pulse">
-          💬
-        </span>
+        <MessageCircle className="h-6 w-6" />
       </button>
     );
   }
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 w-96 max-w-[calc(100vw-3rem)] shadow-2xl">
-      <Card className="h-[600px] max-h-[80vh] flex flex-col bg-white">
-        {/* Header */}
-        <CardHeader className="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-t-lg">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <Bot className="h-5 w-5" />
-              <CardTitle className="text-lg">SafeSpace Assistant</CardTitle>
+    <div className="fixed bottom-6 right-6 z-50 w-[420px] max-w-[calc(100vw-3rem)] shadow-2xl">
+      <Card className="flex h-[640px] max-h-[84vh] flex-col overflow-hidden bg-white">
+        <CardHeader className="border-b bg-slate-950 text-white">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-teal-300" />
+              <CardTitle className="truncate text-lg">Anira</CardTitle>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsOpen(false)}
-              className="text-white hover:bg-white/20"
-            >
+            <Button variant="ghost" size="sm" onClick={() => setIsOpen(false)} className="text-white hover:bg-white/15">
               <X className="h-4 w-4" />
             </Button>
           </div>
-          
-          {/* Mood Indicator */}
-          <div className="flex items-center space-x-2 mt-2 bg-white/20 rounded-full px-3 py-1 w-fit">
-            {getMoodIcon()}
-            <span className="text-xs font-medium">Mood: {getMoodLabel()}</span>
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <Badge className="border-teal-300/40 bg-teal-300/15 text-teal-100">Text + voice</Badge>
+            <Badge className="border-sky-300/40 bg-sky-300/15 text-sky-100">Same language reply</Badge>
+            <Badge className="border-amber-300/40 bg-amber-300/15 text-amber-100">Support triage</Badge>
           </div>
         </CardHeader>
 
-        {/* Messages */}
-        <CardContent className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+        <CardContent className="flex-1 space-y-4 overflow-y-auto bg-slate-50 p-4">
           {messages.map((message) => (
-            <div key={message.id}>
-              <div
-                className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                <div
-                  className={`max-w-[80%] rounded-lg p-3 ${
-                    message.sender === 'user'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-white border border-gray-200'
-                  }`}
-                >
-                  <div className="flex items-start space-x-2">
-                    {message.sender === 'bot' && (
-                      <Bot className="h-4 w-4 text-purple-600 mt-1 flex-shrink-0" />
+            <div key={message.id} className={message.sender === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+              <div className={`max-w-[86%] rounded-lg border p-3 ${message.sender === 'user' ? 'border-teal-700 bg-teal-700 text-white' : 'border-slate-200 bg-white text-slate-900'}`}>
+                <div className="flex items-start gap-2">
+                  {message.sender === 'bot' ? <Bot className="mt-0.5 h-4 w-4 flex-shrink-0 text-teal-700" /> : <User className="mt-0.5 h-4 w-4 flex-shrink-0" />}
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.text}</p>
+
+                    {message.alertCreated && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-800">
+                          <AlertTriangle className="mr-1 h-3 w-3" /> Support staff may follow up
+                        </Badge>
+                      </div>
                     )}
-                    <p className="text-sm whitespace-pre-wrap">{message.text}</p>
-                    {message.sender === 'user' && (
-                      <User className="h-4 w-4 mt-1 flex-shrink-0" />
+
+                    {message.audioUrl && (
+                      <audio controls src={message.audioUrl} className="h-9 w-full" aria-label="Spoken chatbot reply" />
+                    )}
+
+                    {message.suggestions && message.suggestions.length > 0 && (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {message.suggestions.map((suggestion) => (
+                          <Button
+                            key={suggestion}
+                            variant="outline"
+                            size="sm"
+                            onClick={() => submitToChatbot({ text: suggestion })}
+                            disabled={isLoading}
+                            className="h-auto border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
+                          >
+                            {suggestion}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+
+                    {message.quickActions && message.quickActions.length > 0 && (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {message.quickActions.map((action) => (
+                          <Button key={action.action} size="sm" onClick={() => handleQuickAction(action.action)} className="h-auto bg-slate-900 px-2 py-1 text-xs hover:bg-slate-800">
+                            {action.label}
+                          </Button>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
               </div>
-
-              {/* Suggestions */}
-              {message.suggestions && message.suggestions.length > 0 && (
-                <div className="mt-2 ml-6 space-y-2">
-                  <p className="text-xs text-gray-500">Suggestions:</p>
-                  <div className="flex flex-wrap gap-2">
-                    {message.suggestions.map((suggestion, idx) => (
-                      <Button
-                        key={idx}
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleSuggestionClick(suggestion)}
-                        className="text-xs h-auto py-1 px-2 bg-white hover:bg-blue-50"
-                      >
-                        {suggestion}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Quick Actions */}
-              {message.quickActions && message.quickActions.length > 0 && (
-                <div className="mt-2 ml-6 space-y-2">
-                  <p className="text-xs text-gray-500">Quick Actions:</p>
-                  <div className="flex flex-wrap gap-2">
-                    {message.quickActions.map((action, idx) => (
-                      <Button
-                        key={idx}
-                        size="sm"
-                        onClick={() => handleQuickAction(action.action)}
-                        className="text-xs h-auto py-1 px-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
-                      >
-                        {action.label}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           ))}
 
           {isLoading && (
             <div className="flex justify-start">
-              <div className="bg-white border border-gray-200 rounded-lg p-3">
-                <div className="flex items-center space-x-2">
-                  <Bot className="h-4 w-4 text-purple-600" />
-                  <div className="flex space-x-1">
-                    <div className="w-2 h-2 bg-purple-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <div className="w-2 h-2 bg-purple-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <div className="w-2 h-2 bg-purple-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
-                </div>
+              <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                <Loader2 className="h-4 w-4 animate-spin text-teal-700" />
+                Anira is listening...
               </div>
             </div>
           )}
-          
+
           <div ref={messagesEndRef} />
         </CardContent>
 
-        {/* Input */}
-        <div className="p-4 border-t bg-white rounded-b-lg">
+        <div className="border-t bg-white p-4">
           <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              sendMessage();
+            onSubmit={(event) => {
+              event.preventDefault();
+              submitToChatbot({ text: inputMessage });
             }}
-            className="flex space-x-2"
+            className="flex items-center gap-2"
           >
+            <Button
+              type="button"
+              variant={isRecording ? 'destructive' : 'outline'}
+              size="icon"
+              onClick={isRecording ? stopRecording : startRecording}
+              disabled={isLoading}
+              aria-label={isRecording ? 'Stop recording' : 'Start voice message'}
+            >
+              {isRecording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+            </Button>
             <Input
               value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              placeholder="Type your message..."
-              disabled={isLoading}
-              className="flex-1"
+              onChange={(event) => setInputMessage(event.target.value)}
+              placeholder={isRecording ? 'Recording...' : 'Type your message'}
+              disabled={isLoading || isRecording}
+              className="min-w-0 flex-1"
             />
-            <Button
-              type="submit"
-              disabled={isLoading || !inputMessage.trim()}
-              className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
-            >
+            <Button type="submit" disabled={isLoading || isRecording || !inputMessage.trim()} className="bg-teal-700 hover:bg-teal-800">
               <Send className="h-4 w-4" />
             </Button>
           </form>
+          <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+            <Volume2 className="h-3.5 w-3.5" />
+            Replies include playable audio when Sarvam is configured.
+          </div>
         </div>
       </Card>
     </div>

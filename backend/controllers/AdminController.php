@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../middleware/auth.php';
+require_once __DIR__ . '/../utils/medical_security.php';
 
 class AdminController
 {
@@ -31,13 +32,8 @@ class AdminController
                         u.emergency_contact_phone,
                         u.created_at,
                         u.updated_at,
-                        COUNT(DISTINCT m.id) as mood_logs_count,
-                        COUNT(DISTINCT s.id) as sos_alerts_count,
-                        MAX(m.created_at) as last_mood_log,
                         (SELECT COUNT(*) FROM user_activity_logs WHERE user_id = u.id) as total_interactions
                      FROM users u
-                     LEFT JOIN mood_logs m ON u.id = m.user_id
-                     LEFT JOIN sos_alerts s ON u.id = s.user_id
                      GROUP BY u.id
                      ORDER BY u.created_at DESC";
 
@@ -93,58 +89,71 @@ class AdminController
                 $user['preferences'] = [];
             }
 
-            // Get mood logs
-            $moodQuery = "SELECT id, mood_level, mood_emoji, mood_label, notes, created_at 
-                         FROM mood_logs 
-                         WHERE user_id = ? 
-                         ORDER BY created_at DESC 
-                         LIMIT 100";
-            $stmt = $this->conn->prepare($moodQuery);
-            $stmt->bind_param("i", $userId);
-            $stmt->execute();
-            $moodResult = $stmt->get_result();
-            $moodLogs = [];
-            while ($row = $moodResult->fetch_assoc()) {
-                $moodLogs[] = $row;
+            if ($user['trusted_contacts']) {
+                $user['trusted_contacts'] = json_decode($user['trusted_contacts'], true);
+            } else {
+                $user['trusted_contacts'] = [];
             }
 
-            // Get SOS alerts
-            $sosQuery = "SELECT id, location_latitude as latitude, location_longitude as longitude, status, created_at, resolved_at 
-                        FROM sos_alerts 
-                        WHERE user_id = ? 
-                        ORDER BY created_at DESC 
-                        LIMIT 50";
-            $stmt = $this->conn->prepare($sosQuery);
-            $stmt->bind_param("i", $userId);
-            $stmt->execute();
-            $sosResult = $stmt->get_result();
-            $sosAlerts = [];
-            while ($row = $sosResult->fetch_assoc()) {
-                $sosAlerts[] = $row;
+            // Fetch Medical Profile
+            $medicalProfile = null;
+            $medQuery = "SELECT * FROM medical_profiles WHERE user_id = ?";
+            $medStmt = $this->conn->prepare($medQuery);
+            $medStmt->bind_param("i", $userId);
+            $medStmt->execute();
+            $medResult = $medStmt->get_result();
+            if ($medResult->num_rows > 0) {
+                $medRow = $medResult->fetch_assoc();
+                $medicalProfile = [
+                    'blood_group' => $medRow['blood_group'] ?? '',
+                    'allergies' => decryptMedicalValue($medRow['allergies_encrypted'], true),
+                    'chronic_conditions' => decryptMedicalValue($medRow['chronic_conditions_encrypted'], true),
+                    'current_medications' => decryptMedicalValue($medRow['current_medications_encrypted'], true),
+                    'emergency_contact_name' => decryptMedicalValue($medRow['emergency_contact_name_encrypted']),
+                    'emergency_contact_phone' => decryptMedicalValue($medRow['emergency_contact_phone_encrypted']),
+                    'medical_notes' => decryptMedicalValue($medRow['medical_notes_encrypted']),
+                    'updated_at' => $medRow['updated_at']
+                ];
             }
 
-            // Get trusted contacts
-            $contactsQuery = "SELECT trusted_contacts FROM users WHERE id = ?";
-            $stmt = $this->conn->prepare($contactsQuery);
-            $stmt->bind_param("i", $userId);
-            $stmt->execute();
-            $contactResult = $stmt->get_result();
-            $contactRow = $contactResult->fetch_assoc();
-            $trustedContacts = json_decode($contactRow['trusted_contacts'] ?? '[]', true);
+            // Fetch Medicine Records
+            $medicineRecords = [];
+            $medRecQuery = "SELECT * FROM medicine_records WHERE user_id = ? ORDER BY created_at DESC";
+            $medRecStmt = $this->conn->prepare($medRecQuery);
+            $medRecStmt->bind_param("i", $userId);
+            $medRecStmt->execute();
+            $medRecResult = $medRecStmt->get_result();
+            while ($mRow = $medRecResult->fetch_assoc()) {
+                $medicineRecords[] = [
+                    'id' => $mRow['id'],
+                    'name' => decryptMedicalValue($mRow['name_encrypted']),
+                    'dosage' => decryptMedicalValue($mRow['dosage_encrypted']),
+                    'frequency' => decryptMedicalValue($mRow['frequency_encrypted']),
+                    'instructions' => decryptMedicalValue($mRow['instructions_encrypted']),
+                    'status' => $mRow['status'],
+                    'start_date' => $mRow['start_date'],
+                    'end_date' => $mRow['end_date']
+                ];
+            }
+
+            // Fetch Appointments
+            $appointments = [];
+            $aptQuery = "SELECT * FROM appointments WHERE user_id = ? ORDER BY created_at DESC";
+            $aptStmt = $this->conn->prepare($aptQuery);
+            $aptStmt->bind_param("i", $userId);
+            $aptStmt->execute();
+            $aptResult = $aptStmt->get_result();
+            while ($aRow = $aptResult->fetch_assoc()) {
+                $appointments[] = $aRow;
+            }
 
             return [
                 'success' => true,
                 'user' => $user,
-                'mood_logs' => $moodLogs,
-                'mood_logs_count' => count($moodLogs),
-                'sos_alerts' => $sosAlerts,
-                'sos_alerts_count' => count($sosAlerts),
-                'trusted_contacts' => $trustedContacts,
-                'stats' => [
-                    'total_moods' => count($moodLogs),
-                    'total_sos' => count($sosAlerts),
-                    'avg_mood' => $this->getAverageMood($moodLogs)
-                ]
+                'trusted_contacts' => $user['trusted_contacts'],
+                'medical_profile' => $medicalProfile,
+                'medicine_records' => $medicineRecords,
+                'appointments' => $appointments
             ];
         } catch (Exception $e) {
             return [
@@ -154,97 +163,6 @@ class AdminController
         }
     }
 
-    // Get mood analytics for all users
-    public function getMoodAnalytics()
-    {
-        try {
-            $query = "SELECT 
-                        DATE(m.created_at) as date,
-                        AVG(m.mood_level) as avg_mood,
-                        COUNT(*) as total_logs,
-                        MIN(m.mood_level) as min_mood,
-                        MAX(m.mood_level) as max_mood
-                     FROM mood_logs m
-                     WHERE m.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-                     GROUP BY DATE(m.created_at)
-                     ORDER BY date DESC";
-
-            $result = $this->conn->query($query);
-            $analytics = [];
-            while ($row = $result->fetch_assoc()) {
-                $analytics[] = $row;
-            }
-
-            // Get overall stats
-            $statsQuery = "SELECT 
-                            COUNT(DISTINCT user_id) as total_users_with_logs,
-                            AVG(mood_level) as overall_avg_mood,
-                            COUNT(*) as total_mood_logs
-                         FROM mood_logs
-                         WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
-            
-            $statsResult = $this->conn->query($statsQuery);
-            $stats = $statsResult->fetch_assoc();
-
-            return [
-                'success' => true,
-                'analytics' => $analytics,
-                'stats' => $stats
-            ];
-        } catch (Exception $e) {
-            return [
-                'success' => false,
-                'message' => $e->getMessage()
-            ];
-        }
-    }
-
-    // Get SOS alerts analytics
-    public function getSOSAnalytics()
-    {
-        try {
-            $query = "SELECT 
-                        id,
-                        user_id,
-                        (SELECT email FROM users WHERE id = user_id) as user_email,
-                        location_latitude as latitude,
-                        location_longitude as longitude,
-                        status,
-                        created_at,
-                        resolved_at
-                     FROM sos_alerts
-                     ORDER BY created_at DESC
-                     LIMIT 100";
-
-            $result = $this->conn->query($query);
-            $alerts = [];
-            while ($row = $result->fetch_assoc()) {
-                $alerts[] = $row;
-            }
-
-            // Get stats
-            $statsQuery = "SELECT 
-                            COUNT(*) as total_alerts,
-                            COUNT(CASE WHEN status = 'active' THEN 1 END) as active_alerts,
-                            COUNT(CASE WHEN status = 'resolved' THEN 1 END) as resolved_alerts,
-                            COUNT(DISTINCT user_id) as users_triggered_sos
-                         FROM sos_alerts";
-            
-            $statsResult = $this->conn->query($statsQuery);
-            $stats = $statsResult->fetch_assoc();
-
-            return [
-                'success' => true,
-                'alerts' => $alerts,
-                'stats' => $stats
-            ];
-        } catch (Exception $e) {
-            return [
-                'success' => false,
-                'message' => $e->getMessage()
-            ];
-        }
-    }
 
     // Get user activity timeline (all interactions)
     public function getUserActivityTimeline($userId, $limit = 50)
@@ -270,33 +188,6 @@ class AdminController
                 $activities[] = $row;
             }
 
-            // Mood logs
-            $moodQuery = "SELECT 'mood' as type, id, 'mood_log' as activity_type, created_at, 
-                         CONCAT('Logged mood: ', mood_label) as description,
-                         mood_emoji as icon
-                         FROM mood_logs WHERE user_id = ?
-                         ORDER BY created_at DESC LIMIT ?";
-            $stmt = $this->conn->prepare($moodQuery);
-            $stmt->bind_param("ii", $userId, $limit);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            while ($row = $result->fetch_assoc()) {
-                $activities[] = $row;
-            }
-
-            // SOS alerts
-            $sosQuery = "SELECT 'sos' as type, id, 'sos_alert' as activity_type, created_at,
-                        CONCAT('Triggered SOS alert - Status: ', status) as description,
-                        '🆘' as icon
-                        FROM sos_alerts WHERE user_id = ?
-                        ORDER BY created_at DESC LIMIT ?";
-            $stmt = $this->conn->prepare($sosQuery);
-            $stmt->bind_param("ii", $userId, $limit);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            while ($row = $result->fetch_assoc()) {
-                $activities[] = $row;
-            }
 
             // Sort by date
             usort($activities, function ($a, $b) {
@@ -327,8 +218,6 @@ class AdminController
             'login' => '🔐',
             'logout' => '👋',
             'profile_update' => '✏️',
-            'mood_log' => '😊',
-            'sos_alert' => '🆘',
             'safety_feature' => '🛡️',
             'wellness_activity' => '💚',
             'resource_view' => '📚'
@@ -345,27 +234,6 @@ class AdminController
             // Total users
             $usersQuery = "SELECT COUNT(*) as total FROM users";
             $summary['total_users'] = $this->conn->query($usersQuery)->fetch_assoc()['total'];
-
-            // Total mood logs
-            $moods = "SELECT COUNT(*) as total FROM mood_logs";
-            $summary['total_mood_logs'] = $this->conn->query($moods)->fetch_assoc()['total'];
-
-            // Total SOS alerts
-            $sos = "SELECT COUNT(*) as total FROM sos_alerts";
-            $summary['total_sos_alerts'] = $this->conn->query($sos)->fetch_assoc()['total'];
-
-            // Active SOS alerts
-            $activeSos = "SELECT COUNT(*) as total FROM sos_alerts WHERE status = 'active'";
-            $summary['active_sos_alerts'] = $this->conn->query($activeSos)->fetch_assoc()['total'];
-
-            // Today's activity
-            $todayMoods = "SELECT COUNT(*) as total FROM mood_logs WHERE DATE(created_at) = CURDATE()";
-            $summary['today_mood_logs'] = $this->conn->query($todayMoods)->fetch_assoc()['total'];
-
-            // Average mood (last 7 days)
-            $avgMood = "SELECT AVG(mood_level) as avg FROM mood_logs WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
-            $result = $this->conn->query($avgMood)->fetch_assoc();
-            $summary['avg_mood_7days'] = round($result['avg'] ?? 0, 2);
 
             // Active users today (users who have been active in the last 24 hours)
             $activeTodayQuery = "SELECT COUNT(*) as total FROM users 
@@ -392,14 +260,6 @@ class AdminController
                 'message' => $e->getMessage()
             ];
         }
-    }
-
-    // Helper function to calculate average mood
-    private function getAverageMood($moodLogs)
-    {
-        if (count($moodLogs) === 0) return 0;
-        $total = array_sum(array_column($moodLogs, 'mood_level'));
-        return round($total / count($moodLogs), 2);
     }
 }
 

@@ -33,15 +33,32 @@ function verifyPassword($password, $hash) {
 }
 
 function getAuthToken() {
-    $headers = getallheaders();
-    
-    if (isset($headers['Authorization'])) {
-        $authHeader = $headers['Authorization'];
-        if (preg_match('/Bearer\s+(\S+)/', $authHeader, $matches)) {
-            return $matches[1];
+    $authHeader = null;
+
+    // getallheaders() is not always available and may omit Authorization (e.g. PHP built-in server)
+    if (function_exists('getallheaders')) {
+        $headers = getallheaders();
+        if (is_array($headers)) {
+            foreach ($headers as $key => $value) {
+                if (strtolower((string) $key) === 'authorization') {
+                    $authHeader = $value;
+                    break;
+                }
+            }
         }
     }
-    
+
+    if (!$authHeader && !empty($_SERVER['HTTP_AUTHORIZATION'])) {
+        $authHeader = $_SERVER['HTTP_AUTHORIZATION'];
+    }
+    if (!$authHeader && !empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+        $authHeader = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+    }
+
+    if ($authHeader && preg_match('/Bearer\s+(\S+)/', $authHeader, $matches)) {
+        return $matches[1];
+    }
+
     return null;
 }
 

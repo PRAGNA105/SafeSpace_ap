@@ -12,7 +12,7 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-PROJECT_DIR="/Users/tanishka/Downloads/shadcn-ui 2"
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Function to check if port is in use
 check_port() {

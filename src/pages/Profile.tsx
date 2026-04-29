@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Shield, User, Phone, Mail, MapPin, ArrowLeft, Edit, Save, Heart, ShieldCheck, LogOut, Users, Plus, Trash2, AlertCircle } from 'lucide-react';
+import { Shield, User, Phone, Mail, ArrowLeft, Edit, Save, Heart, ShieldCheck, LogOut, Users, Plus, Trash2, AlertCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { apiCall } from '@/lib/api';
@@ -300,7 +300,6 @@ export default function Profile() {
             )}
             {profile.hostel && (
               <CardDescription className="text-lg flex items-center justify-center space-x-2 mt-2">
-                <MapPin className="h-5 w-5 text-gray-500" />
                 <span>{profile.hostel}</span>
               </CardDescription>
             )}
@@ -468,7 +467,7 @@ export default function Profile() {
               </Button>
             </CardTitle>
             <CardDescription>
-              These contacts will be notified when you trigger an emergency SOS alert
+              These contacts will be notified during emergency situations
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -531,7 +530,7 @@ export default function Profile() {
                 <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-3" />
                 <p className="text-gray-600 font-medium mb-2">No Trusted Contacts Yet</p>
                 <p className="text-sm text-gray-500 mb-4">
-                  Add emergency contacts who will be notified during SOS alerts
+                  Add emergency contacts who will be notified during emergencies
                 </p>
                 <Button
                   variant="outline"
@@ -715,7 +714,7 @@ export default function Profile() {
             <div className="grid md:grid-cols-3 gap-4">
               <Link to="/safety">
                 <Button variant="outline" className="w-full">
-                  🚨 Emergency SOS
+                  🚑 Call Ambulance
                 </Button>
               </Link>
               <Link to="/wellness">

@@ -1,17 +1,17 @@
--- Google OAuth Integration Migration
+-- Google OAuth Integration Migration (Updated to match AuthController.php)
 -- Add Google OAuth columns to users table
 
 ALTER TABLE users
-ADD COLUMN google_id VARCHAR(255) UNIQUE DEFAULT NULL AFTER password,
-ADD COLUMN oauth_provider VARCHAR(50) DEFAULT NULL AFTER google_id,
-ADD COLUMN avatar_url TEXT DEFAULT NULL AFTER oauth_provider;
+ADD COLUMN oauth_provider VARCHAR(50) DEFAULT NULL AFTER campus,
+ADD COLUMN oauth_id VARCHAR(255) UNIQUE DEFAULT NULL AFTER oauth_provider,
+ADD COLUMN oauth_profile_image VARCHAR(500) DEFAULT NULL AFTER oauth_id,
+ADD COLUMN last_active DATETIME DEFAULT NULL AFTER is_active;
 
--- Create index for faster Google ID lookups
-CREATE INDEX idx_google_id ON users(google_id);
+-- Create index for faster OAuth ID lookups
+CREATE INDEX idx_oauth_id ON users(oauth_id);
 CREATE INDEX idx_oauth_provider ON users(oauth_provider);
 
--- Update existing users to have NULL for OAuth fields (already set by DEFAULT)
 -- This allows both traditional email/password and OAuth users
+-- oauth_id is unique to prevent duplicate Google accounts linked to different emails
+-- oauth_provider can be 'google' for now
 
--- Note: google_id should be unique to prevent duplicate Google accounts
--- oauth_provider can be 'google', 'facebook', 'apple', etc. for future expansion

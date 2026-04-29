@@ -12,12 +12,28 @@ class AuthController {
     public function register() {
         $data = json_decode(file_get_contents("php://input"), true);
         
-        if (!isset($data['email']) || !isset($data['password']) || !isset($data['first_name'])) {
+        $email = trim($data['email'] ?? '');
+        $password = $data['password'] ?? '';
+        $first_name = trim($data['first_name'] ?? '');
+
+        if (empty($email)) {
             http_response_code(400);
-            return [
-                'success' => false,
-                'message' => 'Email, password, and first name are required'
-            ];
+            return ['success' => false, 'message' => 'Email field cannot be empty'];
+        }
+
+        if (empty($password)) {
+            http_response_code(400);
+            return ['success' => false, 'message' => 'Password field cannot be empty'];
+        }
+
+        if (empty($first_name)) {
+            http_response_code(400);
+            return ['success' => false, 'message' => 'First name is required to create an account'];
+        }
+
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            http_response_code(400);
+            return ['success' => false, 'message' => 'Invalid email format provided'];
         }
         
         $email = $data['email'];
@@ -86,16 +102,28 @@ class AuthController {
     public function login() {
         $data = json_decode(file_get_contents("php://input"), true);
         
-        if (!isset($data['email']) || !isset($data['password'])) {
+        $email = trim($data['email'] ?? '');
+        $password = $data['password'] ?? '';
+
+        if (empty($email) && empty($password)) {
             http_response_code(400);
-            return [
-                'success' => false,
-                'message' => 'Email and password are required'
-            ];
+            return ['success' => false, 'message' => 'Both Email and Password fields are required'];
         }
         
-        $email = $data['email'];
-        $password = $data['password'];
+        if (empty($email)) {
+            http_response_code(400);
+            return ['success' => false, 'message' => 'Email field cannot be empty'];
+        }
+
+        if (empty($password)) {
+            http_response_code(400);
+            return ['success' => false, 'message' => 'Password field cannot be empty'];
+        }
+
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            http_response_code(400);
+            return ['success' => false, 'message' => 'Invalid email format provided'];
+        }
         
         $query = "SELECT id, password, first_name, last_name FROM users WHERE email = ?";
         $stmt = $this->conn->prepare($query);
@@ -104,20 +132,26 @@ class AuthController {
         $result = $stmt->get_result();
         
         if ($result->num_rows === 0) {
-            http_response_code(401);
+            http_response_code(404);
             return [
                 'success' => false,
-                'message' => 'Invalid email or password'
+                'message' => 'Email not registered or username does not exist.'
             ];
         }
         
         $user = $result->fetch_assoc();
         
+        // Add a check in case account is locked or not verified (if the system supports it)
+        if (isset($user['is_active']) && $user['is_active'] == 0) {
+            http_response_code(403);
+            return ['success' => false, 'message' => 'Account not verified or disabled. Please contact support.'];
+        }
+
         if (!verifyPassword($password, $user['password'])) {
             http_response_code(401);
             return [
                 'success' => false,
-                'message' => 'Invalid email or password'
+                'message' => 'Wrong password. Please try again.'
             ];
         }
         
@@ -134,11 +168,15 @@ class AuthController {
         $stmt->bind_param("issss", $user_id, $token, $ip, $userAgent, $expires);
         $stmt->execute();
 
-        // Update user's last_active timestamp
-        $updateActivity = $this->conn->prepare("UPDATE users SET last_active = NOW() WHERE id = ?");
-        $updateActivity->bind_param("i", $user_id);
-        $updateActivity->execute();
-        
+        // Optional: older DBs may not have last_active (see database/oauth_migration.sql)
+        try {
+            $updateActivity = $this->conn->prepare("UPDATE users SET last_active = NOW() WHERE id = ?");
+            $updateActivity->bind_param("i", $user_id);
+            $updateActivity->execute();
+        } catch (Throwable $e) {
+            /* ignore if column missing */
+        }
+
         return [
             'success' => true,
             'message' => 'Login successful',
@@ -228,9 +266,11 @@ class AuthController {
                 $user['oauth_profile_image'] = $picture;
             } else {
                 // 3. Create new user
-                $insertQuery = "INSERT INTO users (email, first_name, last_name, oauth_provider, oauth_id, oauth_profile_image) VALUES (?, ?, ?, 'google', ?, ?)";
+                // Older schemas still require a non-null password even for OAuth-created accounts.
+                $generatedPassword = hashPassword(bin2hex(random_bytes(16)));
+                $insertQuery = "INSERT INTO users (email, password, first_name, last_name, oauth_provider, oauth_id, oauth_profile_image) VALUES (?, ?, ?, ?, 'google', ?, ?)";
                 $stmt = $this->conn->prepare($insertQuery);
-                $stmt->bind_param("sssss", $email, $firstName, $lastName, $googleId, $picture);
+                $stmt->bind_param("ssssss", $email, $generatedPassword, $firstName, $lastName, $googleId, $picture);
                 
                 if ($stmt->execute()) {
                     $userId = $this->conn->insert_id;
@@ -263,15 +303,21 @@ class AuthController {
             throw new Exception("Failed to create session");
         }
 
-        // Update user's last_active timestamp
-        $updateActivity = $this->conn->prepare("UPDATE users SET last_active = NOW() WHERE id = ?");
-        $userId = $user['id'];
-        $updateActivity->bind_param("i", $userId);
-        $updateActivity->execute();
-        
+        try {
+            $updateActivity = $this->conn->prepare("UPDATE users SET last_active = NOW() WHERE id = ?");
+            $userId = $user['id'];
+            $updateActivity->bind_param("i", $userId);
+            $updateActivity->execute();
+        } catch (Throwable $e) {
+            /* ignore if column missing */
+        }
+
         // Remove sensitive data
         unset($user['password']);
         unset($user['oauth_access_token']);
+        if (empty($user['profile_picture']) && !empty($user['oauth_profile_image'])) {
+            $user['profile_picture'] = $user['oauth_profile_image'];
+        }
         
         return [
             'token' => $token,

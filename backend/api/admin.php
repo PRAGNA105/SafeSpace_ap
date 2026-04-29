@@ -3,31 +3,10 @@
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../controllers/AdminController.php';
 
-// Simple admin authentication (you can replace with better auth)
-function isAdminAuthenticated()
-{
-    // Get token from header
-    $headers = getallheaders();
-    $token = $headers['Authorization'] ?? '';
+require_once __DIR__ . '/../middleware/auth.php';
 
-    if (strpos($token, 'Bearer ') !== 0) {
-        return false;
-    }
-
-    $token = substr($token, 7);
-
-    // Simple hardcoded admin token (replace with database check)
-    $adminToken = 'admin_secret_token_12345';
-    
-    return $token === $adminToken;
-}
-
-// Check admin authentication
-if (!isAdminAuthenticated()) {
-    http_response_code(401);
-    echo json_encode(['success' => false, 'message' => 'Unauthorized. Admin token required.']);
-    exit;
-}
+// Authenticate via standard user token (role system not yet implemented)
+$user = requireAuth();
 
 $action = $_GET['action'] ?? '';
 $adminController = new AdminController($conn);
@@ -55,13 +34,7 @@ try {
             echo json_encode($adminController->getUserActivityTimeline($userId, $limit));
             break;
 
-        case 'mood-analytics':
-            echo json_encode($adminController->getMoodAnalytics());
-            break;
 
-        case 'sos-analytics':
-            echo json_encode($adminController->getSOSAnalytics());
-            break;
 
         case 'dashboard-summary':
             echo json_encode($adminController->getDashboardSummary());
@@ -76,8 +49,6 @@ try {
                     'all-users',
                     'user-details?user_id=ID',
                     'user-activity?user_id=ID',
-                    'mood-analytics',
-                    'sos-analytics',
                     'dashboard-summary'
                 ]
             ]);

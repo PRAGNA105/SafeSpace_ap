@@ -1,7 +1,7 @@
 import { GoogleLogin, CredentialResponse } from '@react-oauth/google';
 import { useToast } from '@/hooks/use-toast';
-import { useNavigate } from 'react-router-dom';
 import { apiCall } from '@/lib/api';
+import { useNavigate } from 'react-router-dom';
 
 interface GoogleAuthButtonProps {
   onSuccess: (token: string, user: any) => void;
@@ -28,26 +28,41 @@ export default function GoogleAuthButton({ onSuccess, mode = 'login' }: GoogleAu
       });
 
       if (response.success) {
-        // Store token in localStorage
-        localStorage.setItem('authToken', response.token);
-        localStorage.setItem('user', JSON.stringify(response.user));
+        const token = response.token || response.access_token;
+        const rawUser = response.user || response.data;
+        const user = rawUser
+          ? {
+              ...rawUser,
+              profile_picture:
+                rawUser.profile_picture || rawUser.oauth_profile_image || '',
+            }
+          : null;
+
+        if (!token || !user) {
+          throw new Error('Authentication succeeded but session data is incomplete. Please try again.');
+        }
+
+        localStorage.setItem('authToken', token);
+        localStorage.setItem('user', JSON.stringify(user));
+        window.dispatchEvent(new Event('auth-updated'));
 
         toast({
-          title: "✅ Success!",
+          title: '✅ Success!',
           description: response.message,
         });
 
-        // If new user needs profile setup, redirect to profile page
         if (response.needs_profile_setup) {
           toast({
-            title: "👋 Welcome to SafeSpace!",
-            description: "Let's set up your profile",
+            title: '👋 Welcome to SafeSpace!',
+            description: 'You can finish your profile anytime from the Profile page.',
           });
-          navigate('/profile');
-        } else {
-          // Existing user, call parent success handler
-          onSuccess(response.token, response.user);
-          //navigate('/'); // Ensure redirect to main page after login
+        }
+
+        // Parent must run redirect (home, return URL after booking flow, etc.). Do not navigate only to /profile here or login never leaves the auth screen for new users.
+        try {
+          onSuccess(token, user);
+        } catch {
+          navigate('/', { replace: true });
         }
       } else {
         throw new Error(response.message || 'Google authentication failed');

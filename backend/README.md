@@ -30,7 +30,6 @@ The API endpoints are available at:
 - http://localhost/backend/api/auth.php
 - http://localhost/backend/api/user.php
 - http://localhost/backend/api/mood.php
-- http://localhost/backend/api/sos.php
 
 ## API Documentation
 
@@ -125,33 +124,6 @@ The API endpoints are available at:
 - **Headers**: `Authorization: Bearer {token}`
 - **Response**: Average mood, best/worst mood, total logs for last 30 days
 
-### SOS Endpoints
-
-#### Trigger SOS Alert
-- **URL**: `POST /backend/api/sos.php?action=trigger`
-- **Headers**: `Authorization: Bearer {token}`
-- **Body**:
-  ```json
-  {
-    "latitude": 40.7128,
-    "longitude": -74.0060
-  }
-  ```
-
-#### Resolve SOS Alert
-- **URL**: `POST /backend/api/sos.php?action=resolve`
-- **Headers**: `Authorization: Bearer {token}`
-- **Body**:
-  ```json
-  {
-    "sos_id": 1
-  }
-  ```
-
-#### Get SOS History
-- **URL**: `GET /backend/api/sos.php?action=history`
-- **Headers**: `Authorization: Bearer {token}`
-
 ## Database Tables
 
 ### users
@@ -162,17 +134,11 @@ The API endpoints are available at:
 - Stores daily mood tracking data
 - Fields: id, user_id, mood_level, emoji, label, notes, created_at
 
-### sos_alerts
-- Stores emergency SOS alerts
-- Fields: id, user_id, location, status, created_at, resolved_at
 
 ### sessions
 - Manages user authentication sessions
 - Fields: id, user_id, token, ip_address, user_agent, expires_at
 
-### location_sharing
-- Manages location sharing between users
-- Fields: id, user_id, contact_id, location, timestamps
 
 ### Other Tables
 - breathing_exercises

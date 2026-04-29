@@ -1,13 +1,12 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Shield, Mail, Lock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { apiCall } from '@/lib/api';
-import GoogleAuthButton from '@/components/ui/google-auth-button';
+import API_BASE_URL, { apiCall } from '@/lib/api';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -15,6 +14,44 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+  const postAuthRedirect = () => {
+    const st = location.state as { from?: string; doctor?: unknown } | null;
+    if (st?.from && st?.doctor) {
+      navigate(st.from, { state: { doctor: st.doctor }, replace: true });
+    } else {
+      navigate('/', { replace: true });
+    }
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+    const userStr = params.get('user');
+
+    if (token && userStr) {
+      try {
+        const user = JSON.parse(decodeURIComponent(userStr));
+        localStorage.setItem('authToken', token);
+        localStorage.setItem('user', JSON.stringify(user));
+        window.dispatchEvent(new Event('auth-updated'));
+
+        toast({
+          title: "✅ Login Successful",
+          description: `Welcome back, ${user.first_name || 'User'}!`,
+        });
+
+        window.history.replaceState({}, document.title, window.location.pathname);
+        postAuthRedirect();
+      } catch (e) {
+        toast({
+          title: "❌ Login Failed",
+          description: "Could not parse login data",
+          variant: "destructive"
+        });
+      }
+    }
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,13 +67,14 @@ export default function Login() {
       if (response.success) {
         localStorage.setItem('authToken', response.token);
         localStorage.setItem('user', JSON.stringify(response.user));
-        
+        window.dispatchEvent(new Event('auth-updated'));
+
         toast({
           title: "✅ Login Successful",
           description: `Welcome back, ${response.user.first_name}!`,
         });
-        
-        navigate('/');
+
+        postAuthRedirect();
       } else {
         throw new Error(response.message || 'Login failed');
       }
@@ -51,9 +89,7 @@ export default function Login() {
     }
   };
 
-  const handleGoogleSuccess = (token: string, user: any) => {
-    navigate('/');
-  };
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-white flex items-center justify-center p-4">
@@ -65,11 +101,19 @@ export default function Login() {
           <CardTitle className="text-2xl">Welcome to SafeSpace</CardTitle>
           <CardDescription>Sign in to access your account</CardDescription>
         </CardHeader>
-        
+
         <CardContent>
-          {/* Google OAuth Button */}
+          {/* Hugging Face OAuth Button */}
           <div className="mb-6">
-            <GoogleAuthButton onSuccess={handleGoogleSuccess} mode="login" />
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full font-bold text-gray-700 h-10 border-2"
+              onClick={() => window.location.href = `${API_BASE_URL.replace('/api', '')}/api/oauth.php?action=login`}
+            >
+              <img src="https://huggingface.co/front/assets/huggingface_logo-noborder.svg" alt="HF Logo" className="h-5 w-5 mr-2 inline" />
+              Sign in with Hugging Face
+            </Button>
           </div>
 
           <div className="relative mb-6">
